@@ -21,7 +21,6 @@
     video, canvas {
       width: 90%;
       max-width: 400px;
-      /* Removido: transform: scaleX(-1); para não inverter a imagem */
       border-radius: 8px;
     }
 
@@ -31,8 +30,7 @@
 
     canvas {
       position: absolute;
-      /* Ajustado: top para mover mais para baixo */
-      top: 0px; /* Valor original era 80px, aumentei para 150px */
+      top: 0;
       left: 0;
       right: 0;
       margin: auto;
@@ -93,34 +91,45 @@
       }
     }
 
-    async function startDetection() {
+    // --- MUDANÇA 1: A função de detecção foi reestruturada para um loop mais eficiente ---
+    async function runDetection() {
+      // Verifica se o vídeo está tocando para evitar erros
+      if (video.paused || video.ended) {
+        return setTimeout(() => runDetection());
+      }
+      
+      // --- MUDANÇA 2: Opções de detecção para acelerar o processo ---
+      // inputSize: Reduz o tamanho da imagem a ser analisada, aumentando muito a velocidade.
+      // scoreThreshold: Evita detectar "falsos positivos" com baixa confiança.
+      const detectorOptions = new faceapi.TinyFaceDetectorOptions({
+        inputSize: 320, // Quanto menor, mais rápido. 320 é um bom equilíbrio.
+        scoreThreshold: 0.5 // Limiar de confiança para detectar um rosto.
+      });
+
       try {
-        const displaySize = { width: video.videoWidth, height: video.videoHeight };
+        const detections = await faceapi
+          .detectAllFaces(video, detectorOptions)
+          .withFaceLandmarks()
+          .withFaceExpressions();
+
+        const displaySize = { width: video.clientWidth, height: video.clientHeight };
         faceapi.matchDimensions(canvas, displaySize);
 
-        setInterval(async () => {
-          try {
-            const detections = await faceapi
-              .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-              .withFaceLandmarks()
-              .withFaceExpressions();
+        const resized = faceapi.resizeResults(detections, displaySize);
+        
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        faceapi.draw.drawDetections(canvas, resized);
+        faceapi.draw.drawFaceLandmarks(canvas, resized);
+        faceapi.draw.drawFaceExpressions(canvas, resized);
 
-            const resized = faceapi.resizeResults(detections, displaySize);
-
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            faceapi.draw.drawDetections(canvas, resized);
-            faceapi.draw.drawFaceLandmarks(canvas, resized);
-            faceapi.draw.drawFaceExpressions(canvas, resized);
-
-          } catch (detectError) {
-            console.warn("⚠️ Erro durante a detecção:", detectError.message);
-          }
-        }, 150);
-      } catch (error) {
-        console.error("❌ Falha ao iniciar detecção:", error);
-        alert("Erro ao iniciar a detecção facial.\n\n" + error.message);
+      } catch (detectError) {
+        console.warn("⚠️ Erro durante a detecção:", detectError.message);
       }
+
+      // --- MUDANÇA 3: Usando requestAnimationFrame para um loop suave e sem sobrecarga ---
+      // Em vez de setInterval, chamamos a próxima detecção assim que a atual terminar.
+      requestAnimationFrame(runDetection);
     }
 
     // Inicialização
@@ -130,9 +139,12 @@
         await startVideo();
 
         video.addEventListener('play', () => {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          startDetection();
+          // Ajusta as dimensões do canvas uma vez que o vídeo começa a tocar
+          const displaySize = { width: video.clientWidth, height: video.clientHeight };
+          faceapi.matchDimensions(canvas, displaySize);
+          
+          // Inicia o loop de detecção
+          runDetection();
         });
       } catch (globalError) {
         console.log("❌ Inicialização interrompida por erro:", globalError.message);
